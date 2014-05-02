@@ -45,7 +45,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-message("PACKAGES: ${PACKAGES}")
+#message("PACKAGES: ${PACKAGES}")
 if(${PACKAGES} MATCHES "^<" OR NOT PACKAGES)
     message("Error retreiving manifest")
     set(PACKAGES "")
