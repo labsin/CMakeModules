@@ -28,7 +28,7 @@ if(NOT DEFINED MANIFEST_URL_SUFFIX)
 endif()
 
 if(NOT DEFINED MANIFEST_USE_ARCH)
-    set(MANIFEST_URL_PREFIX true)
+    set(MANIFEST_USE_ARCH true)
 endif()
 
 set(MANIFEST_URL "${MANIFEST_URL_PREFIX}")
@@ -37,6 +37,7 @@ if(MANIFEST_USE_ARCH)
 endif()
 set(MANIFEST_URL "${MANIFEST_URL}${MANIFEST_URL_SUFFIX}")
 
+message("MANIFEST_URL: ${MANIFEST_URL}")
 execute_process(
     COMMAND curl -s "${MANIFEST_URL}"
     COMMAND cut -f 1
@@ -49,7 +50,7 @@ if(${PACKAGES} MATCHES "^<" OR NOT PACKAGES)
     message("Error retreiving manifest")
     set(PACKAGES "")
     set(PACKAGES_LIST "")
-endif()
+else()
     STRING(REGEX REPLACE "\n" ";" PACKAGES_LIST ${PACKAGES})
 endif()
 
@@ -63,7 +64,7 @@ function(deploy_libs libs)
                 message("Mark for install")
                 install(FILES ${resolved}
                     DESTINATION ${CMAKE_INSTALL_LIBDIR}/)
-            elseif()
+            else()
                 execute_process(
                     COMMAND dpkg -S ${resolved} 
                     COMMAND sed "s/^\\(.*\\):.*$/\\1/"
