@@ -7,6 +7,12 @@
 #  MANIFEST_URL_PREFIX - defaults to http://cdimage.ubuntu.com/ubuntu-touch/daily-preinstalled/current/trusty-preinstalled-touch-
 #  MANIFEST_URL_SUFFIX - defaults to .manifest
 #  MANIFEST_USE_ARCH - defaults to true
+#
+# Other variables that are used:
+#  CLICK_DEPLOY_ONLY_LIBS - defaults to true
+#  CLICK_DEPLOY_STATIC_LIBS - defaults to false
+#  CLICK_DEPLOY_INCLUDE_NO_MANIFEST - Include the libs when no manifest was found,
+#    defaults to true
 
 
 include(ResolveLibs)
@@ -31,13 +37,25 @@ if(NOT DEFINED MANIFEST_USE_ARCH)
     set(MANIFEST_USE_ARCH true)
 endif()
 
+if(NOT DEFINED CLICK_DEPLOY_ONLY_LIBS)
+    set(CLICK_DEPLOY_ONLY_LIBS true)
+endif()
+
+if(NOT DEFINED CLICK_DEPLOY_STATIC_LIBS)
+    set(CLICK_DEPLOY_STATIC_LIBS false)
+endif()
+
+if(NOT DEFINED CLICK_DEPLOY_INCLUDE_NO_MANIFEST)
+    set(CLICK_DEPLOY_INCLUDE_NO_MANIFEST true)
+endif()
+
 set(MANIFEST_URL "${MANIFEST_URL_PREFIX}")
 if(MANIFEST_USE_ARCH)
     set(MANIFEST_URL "${MANIFEST_URL}${DPKG_BUILD_ARCH}")
 endif()
 set(MANIFEST_URL "${MANIFEST_URL}${MANIFEST_URL_SUFFIX}")
 
-message("MANIFEST_URL: ${MANIFEST_URL}")
+message(STATUS "MANIFEST_URL: ${MANIFEST_URL}")
 execute_process(
     COMMAND curl -s "${MANIFEST_URL}"
     COMMAND cut -f 1
@@ -45,47 +63,76 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-#message("PACKAGES: ${PACKAGES}")
-if(${PACKAGES} MATCHES "^<" OR NOT PACKAGES)
-    message("Error retreiving manifest")
+if(${PACKAGES} MATCHES "^<" OR NOT PACKAGES) # It's a HTML page or nothing returned
+    message(STATUS "Error retreiving manifest")
     set(PACKAGES "")
     set(PACKAGES_LIST "")
 else()
     STRING(REGEX REPLACE "\n" ";" PACKAGES_LIST ${PACKAGES})
 endif()
 
+function(deploy_lib lib)
+    message(STATUS "Mark ${lib} for install")
+    install(FILES ${lib}
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/)
+endfunction()
+
 function(deploy_libs libs)
-    foreach(lib ${ARGN})
-        message("LIB: ${lib}")
-        resolve_lib(${lib} resolved succes)
-        if(succes)
-            message("RESOLVED: ${resolved}")
-            if(NOT PACKAGES_LIST)
-                message("Mark for install")
-                install(FILES ${resolved}
-                    DESTINATION ${CMAKE_INSTALL_LIBDIR}/)
-            else()
-                execute_process(
-                    COMMAND dpkg -S ${resolved} 
-                    COMMAND sed "s/^\\(.*\\):.*$/\\1/"
-                    COMMAND sed "s/^\\(.*\\):${DPKG_BUILD_ARCH}\$/\\1/"
-                    OUTPUT_VARIABLE PACKAGE
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-                message("PACKAGE: ${PACKAGE}")
-                list(FIND PACKAGES_LIST ${PACKAGE} index)
-                if(index EQUAL -1)
-                    list(FIND PACKAGES_LIST "${PACKAGE}:${DPKG_BUILD_ARCH}" index)
-                endif()
-                if(index EQUAL -1)
-                    message("Mark for install")
-                    install(FILES ${resolved}
-                        DESTINATION ${CMAKE_INSTALL_LIBDIR}/)
-                else()
-                    message("In manifest")
-                endif()
-            endif()
-        else(succes)
-            message("Not includeable")
-        endif(succes)
-    endforeach()
+    message(STATUS "Deploy Libs")
+    set(error false)
+    if(NOT PACKAGES_LIST) # If manifest was not downloaded
+        if(NOT ${CLICK_DEPLOY_INCLUDE_NO_MANIFEST})
+            set(error true)
+            message(STATUS "  No manifest found")
+        endif()
+    endif()
+    if(NOT error)
+        foreach(lib ${ARGN})
+            set(error false)
+            message(STATUS "  LIB: ${lib}")
+            resolve_lib(${lib} resolved found_lib)
+            if(found_lib)
+                message(STATUS "    RESOLVED: ${resolved}")
+                if(NOT ${CLICK_DEPLOY_STATIC_LIBS})
+                    if(${resolved} MATCHES "^.*\\.a([0-9]|\\.)*$") # If it's a static lib
+                        set(error true)
+                        message(STATUS "    Not deploying static libs")
+                    endif()
+                endif(NOT ${CLICK_DEPLOY_STATIC_LIBS})
+                if(${CLICK_DEPLOY_ONLY_LIBS})
+                    if(${resolved} MATCHES "^.*\\.(so|a)([0-9]|\\.)*$") # If it's a static or dynamic lib
+                    else()
+                        set(error true)
+                        message(STATUS "    Only deploy libs")
+                    endif()
+                endif(${CLICK_DEPLOY_ONLY_LIBS})
+            endif(found_lib)
+            if(found_lib AND NOT error)
+                if(NOT PACKAGES_LIST)
+                    deploy_lib(${resolved})
+                else(NOT PACKAGES_LIST)
+                    execute_process(
+                        COMMAND dpkg -S ${resolved}
+                        COMMAND sed "s/^\\(.*\\):.*$/\\1/"
+                        COMMAND sed "s/^\\(.*\\):${DPKG_BUILD_ARCH}\$/\\1/"
+                        OUTPUT_VARIABLE PACKAGE
+                        OUTPUT_STRIP_TRAILING_WHITESPACE)
+                    message(STATUS "    PACKAGE: ${PACKAGE}")
+                    list(FIND PACKAGES_LIST ${PACKAGE} index) # Search for package in manifest list
+                    if(index EQUAL -1)
+                        list(FIND PACKAGES_LIST "${PACKAGE}:${DPKG_BUILD_ARCH}" index) # Search for package:architecture in manifest
+                    endif(index EQUAL -1)
+                    if(index EQUAL -1)
+                        deploy_lib(${resolved})
+                    else(index EQUAL -1)
+                        message(STATUS "    In manifest")
+                    endif(index EQUAL -1)
+                endif(NOT PACKAGES_LIST)
+            else(found_lib AND NOT error)
+                if(NOT error)
+                    message(STATUS "    Lib not found")
+                endif(NOT error)
+            endif(found_lib AND NOT error)
+        endforeach(lib ${ARGN})
+    endif(NOT error)
 endfunction()
